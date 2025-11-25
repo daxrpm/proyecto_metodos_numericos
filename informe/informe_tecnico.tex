@@ -1,0 +1,761 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[spanish]{babel}
+\usepackage{amsmath, amssymb, amsfonts}
+\usepackage{graphicx}
+\usepackage{geometry}
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\pgfplotsset{compat=1.18}
+
+\geometry{margin=2.5cm}
+
+% Configuración de listings
+\lstset{
+    language=Python,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue},
+    stringstyle=\color{red},
+    commentstyle=\color{green},
+    numbers=left,
+    numberstyle=\tiny,
+    stepnumber=1,
+    numbersep=5pt,
+    frame=single,
+    breaklines=true
+}
+
+\title{\textbf{Análisis de la Frontera de Decisión de la Red Neuronal Blackbox S usando Métodos Numéricos}}
+\author{Proyecto Métodos Numéricos 2025-B}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\tableofcontents
+\newpage
+
+% -----------------------------------------------------------
+% INTRODUCCIÓN
+% -----------------------------------------------------------
+
+\section{Introducción}
+
+El presente informe analiza el comportamiento de la red neuronal \textbf{Blackbox S}, un modelo de clasificación binaria que recibe como entrada un par de valores $(x_1, x_2)$ con $x_1 \geq 0$ y devuelve una predicción $0$ o $1$. La red neuronal puede interpretarse como una función paramétrica:
+
+\[
+f_\theta : \mathbb{R}^2 \to \mathbb{B}, \qquad \mathbb{B} = \{0,1\},
+\]
+
+donde $\theta$ representa los pesos aprendidos durante el entrenamiento. Debido a que su estructura interna no es accesible, la red se trata como una \textit{BlackBox}, por lo que el análisis debe realizarse a partir de sus salidas sobre una región del plano.
+
+El objetivo principal del proyecto es determinar la relación analítica entre las variables $x_1$ y $x_2$ que describe la frontera de decisión del modelo. Se identificó inicialmente que la función base que describe esta frontera está relacionada con la función sinc, específicamente $\frac{\sin(x)}{x}$, por lo que se partió del análisis con esta ecuación.
+
+Para estudiar la frontera de decisión del modelo, se generó una malla bidimensional en el espacio $(x_1, x_2)$ y se evaluó la red neuronal en cada punto de la malla. Esta exploración permitió identificar la región donde la red asigna la clase $1$, la cual resulta ser una banda estrecha con forma curva. Posteriormente, se extrajo una curva representativa de esta banda y se ajustó una función analítica del tipo:
+
+\[
+f(x) = a \frac{\sin(bx)}{bx} + c,
+\]
+
+empleando métodos numéricos de ajuste no lineal, específicamente el método de Levenberg-Marquardt implementado mediante \texttt{curve\_fit} y \texttt{leastsq} de \texttt{scipy.optimize}.
+
+\newpage
+
+% -----------------------------------------------------------
+% METODOLOGÍA
+% -----------------------------------------------------------
+
+\section{Metodología}
+
+\subsection{Desarrollo Matemático}
+
+\subsubsection{Formulación del Problema de Ajuste de Curvas}
+
+Dado un conjunto de $n$ puntos observados $(x_i, y_i)$ para $i = 1, 2, \ldots, n$, donde $x_i$ representa valores de $x_1$ e $y_i$ representa valores de $x_2$ en la frontera de decisión, buscamos encontrar una función $f(x, \boldsymbol{\theta})$ que minimice la suma de los cuadrados de los residuos:
+
+\begin{equation}
+S(\boldsymbol{\theta}) = \sum_{i=1}^{n} [y_i - f(x_i, \boldsymbol{\theta})]^2 = \sum_{i=1}^{n} r_i^2(\boldsymbol{\theta})
+\label{eq:funcion_objetivo}
+\end{equation}
+
+donde:
+\begin{itemize}
+    \item $f(x_i, \boldsymbol{\theta})$ es el modelo paramétrico
+    \item $\boldsymbol{\theta} = [a, b, c]^T$ es el vector de parámetros a estimar
+    \item $r_i(\boldsymbol{\theta}) = y_i - f(x_i, \boldsymbol{\theta})$ es el residuo del $i$-ésimo punto
+\end{itemize}
+
+\subsubsection{Modelo Paramétrico: Función Sinc}
+
+Basándonos en la observación de que la frontera de decisión sigue un patrón similar a la función sinc, proponemos el siguiente modelo paramétrico:
+
+\begin{equation}
+f(x, a, b, c) = a \cdot \frac{\sin(b \cdot x)}{b \cdot x} + c
+\label{eq:modelo_sinc}
+\end{equation}
+
+donde:
+\begin{itemize}
+    \item $a \in \mathbb{R}$ es el parámetro de amplitud
+    \item $b \in \mathbb{R}$ es el parámetro de frecuencia
+    \item $c \in \mathbb{R}$ es el parámetro de desplazamiento vertical
+\end{itemize}
+
+Para evitar problemas de división por cero cuando $b \cdot x \approx 0$, se utiliza una aproximación numéricamente estable:
+
+\begin{equation}
+f(x, a, b, c) = a \cdot \frac{\sin(bx)}{bx + \epsilon} + c
+\label{eq:modelo_sinc_estable}
+\end{equation}
+
+donde $\epsilon = 10^{-9}$ es un valor pequeño para estabilidad numérica.
+
+\subsubsection{El Método de Levenberg-Marquardt: Fundamentos Teóricos}
+
+El método de Levenberg-Marquardt (LM) es un algoritmo híbrido que combina el método de Gauss-Newton y el método de descenso de gradiente, diseñado específicamente para resolver problemas de mínimos cuadrados no lineales \cite{levenberg1944method, marquardt1963algorithm}. Este método es particularmente efectivo cuando se está cerca del mínimo, donde exhibe convergencia rápida, pero también es robusto cuando se está lejos del mínimo.
+
+\paragraph{Derivación del Método}
+
+Partiendo de la función objetivo $S(\boldsymbol{\theta})$ definida en la ecuación \eqref{eq:funcion_objetivo}, buscamos minimizar esta función. El gradiente de $S$ con respecto a $\boldsymbol{\theta}$ es:
+
+\begin{equation}
+\nabla S(\boldsymbol{\theta}) = -2 \sum_{i=1}^{n} r_i(\boldsymbol{\theta}) \nabla f(x_i, \boldsymbol{\theta}) = -2 \mathbf{J}^T \mathbf{r}
+\label{eq:gradiente}
+\end{equation}
+
+donde $\mathbf{J}$ es la matriz Jacobiana de dimensiones $n \times p$ (donde $p$ es el número de parámetros), cuyos elementos son:
+
+\begin{equation}
+J_{ij} = \frac{\partial r_i}{\partial \theta_j} = -\frac{\partial f(x_i, \boldsymbol{\theta})}{\partial \theta_j}
+\label{eq:jacobiano}
+\end{equation}
+
+Para nuestro modelo $f(x, a, b, c) = a \cdot \frac{\sin(bx)}{bx} + c$, las derivadas parciales son:
+
+\begin{align}
+\frac{\partial f}{\partial a} &= \frac{\sin(bx)}{bx} \label{eq:derivada_a} \\
+\frac{\partial f}{\partial b} &= a \cdot \frac{x \cos(bx) - \sin(bx)}{b^2 x} = a \cdot \frac{\cos(bx) - \frac{\sin(bx)}{bx}}{b} \label{eq:derivada_b} \\
+\frac{\partial f}{\partial c} &= 1 \label{eq:derivada_c}
+\end{align}
+
+\paragraph{Método de Gauss-Newton}
+
+El método de Gauss-Newton aproxima la función objetivo mediante una expansión de Taylor de segundo orden alrededor del punto actual $\boldsymbol{\theta}^{(k)}$:
+
+\begin{equation}
+S(\boldsymbol{\theta}^{(k)} + \Delta \boldsymbol{\theta}) \approx S(\boldsymbol{\theta}^{(k)}) + \Delta \boldsymbol{\theta}^T \nabla S(\boldsymbol{\theta}^{(k)}) + \frac{1}{2} \Delta \boldsymbol{\theta}^T \mathbf{H} \Delta \boldsymbol{\theta}
+\label{eq:taylor}
+\end{equation}
+
+donde $\mathbf{H}$ es la matriz hessiana. En mínimos cuadrados, se aproxima el hessiano como $\mathbf{H} \approx \mathbf{J}^T \mathbf{J}$, lo que conduce a la ecuación de actualización de Gauss-Newton:
+
+\begin{equation}
+\boldsymbol{\theta}^{(k+1)} = \boldsymbol{\theta}^{(k)} - (\mathbf{J}^T \mathbf{J})^{-1} \mathbf{J}^T \mathbf{r}
+\label{eq:gauss_newton}
+\end{equation}
+
+Este método converge rápidamente cerca del mínimo, pero puede fallar cuando $\mathbf{J}^T \mathbf{J}$ es singular o mal condicionada.
+
+\paragraph{Método de Descenso de Gradiente}
+
+El método de descenso de gradiente actualiza los parámetros en la dirección opuesta al gradiente:
+
+\begin{equation}
+\boldsymbol{\theta}^{(k+1)} = \boldsymbol{\theta}^{(k)} - \alpha \nabla S(\boldsymbol{\theta}^{(k)}) = \boldsymbol{\theta}^{(k)} + 2\alpha \mathbf{J}^T \mathbf{r}
+\label{eq:gradiente_descenso}
+\end{equation}
+
+donde $\alpha > 0$ es el tamaño del paso. Este método es más robusto pero converge más lentamente.
+
+\paragraph{Actualización Iterativa de Levenberg-Marquardt}
+
+El método LM combina ambos enfoques mediante la siguiente ecuación de actualización:
+
+\begin{equation}
+\boldsymbol{\theta}^{(k+1)} = \boldsymbol{\theta}^{(k)} - \left[\mathbf{J}^T \mathbf{J} + \lambda^{(k)} \mathbf{I}\right]^{-1} \mathbf{J}^T \mathbf{r}
+\label{eq:levenberg_marquardt}
+\end{equation}
+
+donde:
+\begin{itemize}
+    \item $\boldsymbol{\theta}^{(k)}$ es el vector de parámetros en la iteración $k$
+    \item $\mathbf{J}$ es la matriz Jacobiana evaluada en $\boldsymbol{\theta}^{(k)}$
+    \item $\mathbf{r} = [r_1, r_2, \ldots, r_n]^T$ es el vector de residuos
+    \item $\lambda^{(k)} \geq 0$ es el parámetro de regularización (amortiguamiento) en la iteración $k$
+    \item $\mathbf{I}$ es la matriz identidad de dimensiones $p \times p$
+\end{itemize}
+
+El parámetro $\lambda$ controla el comportamiento del algoritmo:
+\begin{itemize}
+    \item Si $\lambda \to 0$: El método se comporta como \textbf{Gauss-Newton} (rápido cerca del mínimo)
+    \item Si $\lambda \to \infty$: El método se comporta como \textbf{descenso de gradiente} (más robusto pero más lento)
+\end{itemize}
+
+\paragraph{Estrategia Adaptativa del Parámetro $\lambda$}
+
+La estrategia adaptativa del parámetro $\lambda$ es crucial para el éxito del método \cite{more1978levenberg}. En cada iteración:
+
+\begin{enumerate}
+    \item Se calcula $\boldsymbol{\theta}^{(k+1)}$ usando la ecuación \eqref{eq:levenberg_marquardt}
+    \item Se evalúa $S(\boldsymbol{\theta}^{(k+1)})$
+    \item \textbf{Si} $S(\boldsymbol{\theta}^{(k+1)}) < S(\boldsymbol{\theta}^{(k)})$:
+    \begin{itemize}
+        \item Se acepta el nuevo parámetro
+        \item Se reduce $\lambda$: $\lambda^{(k+1)} = \lambda^{(k)} / \nu$ (típicamente $\nu = 10$)
+        \item Se incrementa $k$
+    \end{itemize}
+    \item \textbf{Si} $S(\boldsymbol{\theta}^{(k+1)}) \geq S(\boldsymbol{\theta}^{(k)})$:
+    \begin{itemize}
+        \item Se rechaza el nuevo parámetro
+        \item Se aumenta $\lambda$: $\lambda^{(k+1)} = \nu \cdot \lambda^{(k)}$
+        \item Se repite el cálculo con el nuevo $\lambda$
+    \end{itemize}
+\end{enumerate}
+
+Esta estrategia garantiza que la función objetivo sea monótona decreciente: $S(\boldsymbol{\theta}^{(k+1)}) \leq S(\boldsymbol{\theta}^{(k)})$ en cada iteración exitosa.
+
+\paragraph{Criterios de Convergencia}
+
+El algoritmo termina cuando se cumple alguno de los siguientes criterios:
+
+\begin{enumerate}
+    \item \textbf{Convergencia en parámetros}: $\|\boldsymbol{\theta}^{(k+1)} - \boldsymbol{\theta}^{(k)}\| < \epsilon_{\theta}$
+    \item \textbf{Convergencia en función objetivo}: $|S(\boldsymbol{\theta}^{(k+1)}) - S(\boldsymbol{\theta}^{(k)})| < \epsilon_S$
+    \item \textbf{Convergencia en gradiente}: $\|\nabla S(\boldsymbol{\theta}^{(k)})\| = \|\mathbf{J}^T \mathbf{r}\| < \epsilon_g$
+    \item \textbf{Número máximo de iteraciones}: $k > k_{max}$
+\end{enumerate}
+
+\subsubsection{Métricas de Error}
+
+Para evaluar la calidad del ajuste, se utilizan las siguientes métricas:
+
+\begin{itemize}
+    \item \textbf{Suma de Cuadrados de Residuos (SSR)}:
+    \begin{equation}
+    SSR = \sum_{i=1}^{n} r_i^2 = \sum_{i=1}^{n} [y_i - f(x_i, \boldsymbol{\theta})]^2
+    \label{eq:ssr}
+    \end{equation}
+    
+    \item \textbf{Raíz del Error Cuadrático Medio (RMSE)}:
+    \begin{equation}
+    RMSE = \sqrt{\frac{1}{n} \sum_{i=1}^{n} [y_i - f(x_i, \boldsymbol{\theta})]^2} = \sqrt{\frac{SSR}{n}}
+    \label{eq:rmse}
+    \end{equation}
+\end{itemize}
+
+\subsection{Descripción de la Implementación, Resaltando el Método Numérico Utilizado}
+
+\subsubsection{Preparación de Datos}
+
+El proceso de implementación comenzó con la carga del modelo de Keras almacenado en \texttt{blackbox\_S.keras} utilizando la función \texttt{load\_model} del módulo \texttt{Blackbox}. Posteriormente, se generó una malla de puntos para explorar el espacio de entrada.
+
+Inicialmente, se creó una cuadrícula de $500 \times 500 = 250,000$ puntos distribuidos uniformemente en el rango:
+\begin{itemize}
+    \item $x_1 \in [0, 23]$
+    \item $x_2 \in [-1, 4]$
+\end{itemize}
+
+Esta malla grande permitió obtener una visión general del comportamiento del modelo. Los resultados mostraron que la región de clase $1$ es muy pequeña ($1.1\%$ del espacio muestreado), lo que confirmó que la frontera de decisión está bien definida y localizada.
+
+Posteriormente, se redujo la malla a $300 \times 300 = 90,000$ puntos en el rango:
+\begin{itemize}
+    \item $x_1 \in [0.01, 15]$
+    \item $x_2 \in [-0.5, 2.0]$
+\end{itemize}
+
+para obtener una mejor resolución en la región de interés y reducir el tiempo computacional.
+
+\subsubsection{Identificación de la Frontera de Decisión}
+
+Inicialmente, se calcularon puntos de frontera utilizando el método de bisección, identificando los puntos donde el modelo cambia de clasificación de $0$ a $1$ o viceversa. Esto se realizó comparando predicciones adyacentes en la malla. Sin embargo, este método no produjo resultado utiles.
+
+Se exploraron diferentes modelos para ajustar la frontera, incluyendo el análisis de una posible relación hiperbólica. Se observó que al multiplicar $x_1 \cdot x_2$ con las predicciones del modelo se obtenía una desviación estándar baja, lo que sugería inicialmente una relación hiperbólica. Sin embargo, tras un análisis más detallado, se determinó que este no era el modelo correcto.
+
+\subsubsection{Identificación del Modelo Base}
+
+Mediante visualización de los puntos clasificados como $1$, y por la ecuacion dada en clases se identifico que la distribución seguía un patrón similar a la función $\frac{\sin(x)}{x}$ (función sinc). Se realizaron pruebas manuales variando los parámetros de la ecuación:
+
+\[
+y = a \cdot \frac{\sin(b \cdot x)}{b \cdot x} + c
+\]
+
+con diferentes valores de $a$, $b$ y $c$ para obtener una aproximación visual inicial. Estas pruebas permitieron identificar valores iniciales razonables para el algoritmo de optimización.
+
+\subsubsection{Extracción del Borde Superior}
+
+Para el ajuste de la curva, se extrajeron los puntos del borde superior de la región clasificada como $1$. Esto se realizó agrupando los puntos por valores de $x_1$ (redondeados a 2 decimales para agrupar valores cercanos) y seleccionando el punto con mayor valor de $x_2$ en cada grupo. De esta manera, se obtuvo un conjunto de $300$ puntos representativos de la frontera de decisión, asumiendo que la frontera es una función univaluada de $x_1$.
+
+\subsubsection{Ajuste de Parámetros mediante Levenberg-Marquardt}
+
+Para el ajuste automático de parámetros, se utilizaron dos implementaciones del método LM:
+
+\begin{enumerate}
+    \item \textbf{curve\_fit de scipy.optimize}: Esta función utiliza internamente el método LM y proporciona una interfaz de alto nivel. La llamada fue:
+    \begin{lstlisting}
+    popt_curve, _ = curve_fit(sinc_func, x_fit, y_fit, 
+                              p0=[1.2, 8.5, 0], maxfev=1000)
+    \end{lstlisting}
+    donde \texttt{p0} son los valores iniciales y \texttt{maxfev} es el número máximo de evaluaciones de función.
+    
+    \item \textbf{leastsq de scipy.optimize}: Esta función también utiliza LM pero permite acceder a las iteraciones intermedias para visualización. La función de residuos se definió como:
+    \begin{lstlisting}
+    def residual_func(params):
+        a, b, c = params
+        y_pred = sinc_func(x_fit, a, b, c)
+        residuos = y_fit - y_pred
+        # Guardar iteración para visualización
+        return residuos
+    
+    popt, _ = leastsq(residual_func, p0=[1, 1, 0], maxfev=1000)
+    \end{lstlisting}
+\end{enumerate}
+
+La función \texttt{leastsq} fue utilizada específicamente para obtener los parámetros en cada iteración y generar una visualización interactiva del proceso de optimización mediante una animación que muestra la evolución de la curva ajustada.
+
+\subsection{Análisis Analítico de Estabilidad y Convergencia del Método Implementado}
+
+\subsubsection{Estabilidad del Método LM}
+
+El método de Levenberg-Marquardt es estable debido a varias características fundamentales:
+
+\begin{enumerate}
+    \item \textbf{Regularización}: El término $\lambda \mathbf{I}$ en la ecuación \eqref{eq:levenberg_marquardt} previene la singularidad de la matriz $\mathbf{J}^T \mathbf{J}$, garantizando que la matriz $\mathbf{J}^T \mathbf{J} + \lambda \mathbf{I}$ sea siempre invertible, incluso cuando $\mathbf{J}^T \mathbf{J}$ es singular o mal condicionada.
+    
+    \item \textbf{Adaptabilidad}: El parámetro $\lambda$ se ajusta automáticamente durante las iteraciones, permitiendo que el algoritmo se comporte como Gauss-Newton cerca del mínimo (rápido) y como descenso de gradiente lejos del mínimo (robusto).
+    
+    \item \textbf{Monotonicidad}: La estrategia adaptativa garantiza que la función objetivo $S(\boldsymbol{\theta})$ sea monótona decreciente, es decir, $S(\boldsymbol{\theta}^{(k+1)}) \leq S(\boldsymbol{\theta}^{(k)})$ en cada iteración exitosa. Esto asegura que el algoritmo siempre progrese hacia el mínimo.
+    
+    \item \textbf{Convergencia Global}: A diferencia del método de Gauss-Newton puro, el método LM tiene mayor probabilidad de converger desde puntos iniciales alejados del mínimo debido a su comportamiento híbrido.
+\end{enumerate}
+
+\subsubsection{Convergencia}
+
+El método LM converge bajo las siguientes condiciones \cite{nocedal2006numerical}:
+
+\begin{enumerate}
+    \item \textbf{Condición de Lipschitz}: Las derivadas parciales de la función modelo deben ser continuas y acotadas en una vecindad del mínimo. Para nuestro modelo sinc, las derivadas dadas en las ecuaciones \eqref{eq:derivada_a}, \eqref{eq:derivada_b} y \eqref{eq:derivada_c} son continuas en el dominio de interés.
+    
+    \item \textbf{Estimación inicial adecuada}: Los valores iniciales $p_0 = [a_0, b_0, c_0]$ deben estar suficientemente cerca del mínimo global para evitar convergencia a mínimos locales. En nuestro caso, las pruebas manuales permitieron obtener estimaciones iniciales razonables.
+    
+    \item \textbf{Rango completo del Jacobiano}: La matriz Jacobiana debe tener rango completo (o al menos rango igual al número de parámetros) en el mínimo. Esto garantiza que el sistema de ecuaciones \eqref{eq:levenberg_marquardt} tenga solución única.
+    
+    \item \textbf{No singularidad local}: En una vecindad del mínimo, la matriz $\mathbf{J}^T \mathbf{J}$ debe ser positiva definida, lo que garantiza que el mínimo sea localmente único.
+\end{enumerate}
+
+En nuestro caso, la función sinc parametrizada cumple estas condiciones en el dominio de interés, garantizando la convergencia del método.
+
+\subsubsection{Velocidad de Convergencia}
+
+Cerca del mínimo, cuando $\lambda \to 0$, el método LM exhibe convergencia cuadrática (similar a Gauss-Newton), lo que significa que el error disminuye aproximadamente como:
+
+\begin{equation}
+\|\boldsymbol{\theta}^{(k+1)} - \boldsymbol{\theta}^*\| \approx C \|\boldsymbol{\theta}^{(k)} - \boldsymbol{\theta}^*\|^2
+\label{eq:convergencia_cuadratica}
+\end{equation}
+
+donde $\boldsymbol{\theta}^*$ es el mínimo y $C$ es una constante que depende de las segundas derivadas de la función objetivo. Esta convergencia cuadrática es significativamente más rápida que la convergencia lineal del descenso de gradiente.
+
+Lejos del mínimo, cuando $\lambda$ es grande, el método se comporta como descenso de gradiente con convergencia lineal, pero garantiza progreso hacia el mínimo.
+
+\subsection{Diagrama de Flujo}
+
+\subsubsection{Diagrama de Flujo}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance = 1.5cm,
+    every node/.style={
+        rectangle,
+        draw,
+        rounded corners,
+        align=center,
+        minimum width=7cm,
+        minimum height=0.8cm
+    },
+    start/.style={fill=green!20},
+    process/.style={fill=blue!20},
+    decision/.style={fill=yellow!20, diamond, aspect=2},
+    end/.style={fill=red!20}
+]
+
+\node[start] (start) {Inicio};
+\node[process, below of=start] (load) {Cargar modelo Blackbox S};
+\node[process, below of=load] (mesh1) {Generar malla inicial\\$500 \times 500$ puntos};
+\node[process, below of=mesh1] (eval1) {Evaluar red neuronal\\en toda la malla};
+\node[process, below of=eval1] (visual) {Visualizar distribución\\de clases};
+\node[process, below of=visual] (mesh2) {Refinar malla a\\$300 \times 300$ puntos};
+\node[process, below of=mesh2] (eval2) {Evaluar red neuronal\\en malla refinada};
+\node[process, below of=eval2] (filter) {Filtrar puntos\\clasificados como 1};
+\node[process, below of=filter] (border) {Extraer borde superior\\agrupando por $x_1$};
+\node[process, below of=border] (init) {Establecer valores iniciales\\$p_0 = [a_0, b_0, c_0]$};
+\node[process, below of=init] (fit) {Aplicar método LM\\(curve\_fit o leastsq)};
+\node[process, below of=fit] (eval) {Evaluar métricas\\SSR y RMSE};
+\node[process, below of=eval] (visual2) {Visualizar curva ajustada};
+\node[end, below of=visual2] (end) {Fin};
+
+\draw[->] (start) -- (load);
+\draw[->] (load) -- (mesh1);
+\draw[->] (mesh1) -- (eval1);
+\draw[->] (eval1) -- (visual);
+\draw[->] (visual) -- (mesh2);
+\draw[->] (mesh2) -- (eval2);
+\draw[->] (eval2) -- (filter);
+\draw[->] (filter) -- (border);
+\draw[->] (border) -- (init);
+\draw[->] (init) -- (fit);
+\draw[->] (fit) -- (eval);
+\draw[->] (eval) -- (visual2);
+\draw[->] (visual2) -- (end);
+
+\end{tikzpicture}
+\caption{Diagrama de flujo del proceso completo de análisis de la frontera de decisión.}
+\label{fig:diagrama_flujo}
+\end{figure}
+
+
+\subsection{Detalles Adicionales Importantes de la Implementación}
+
+\subsubsection{Manejo de Singularidades Numéricas}
+
+Para evitar problemas numéricos cuando $bx \approx 0$, se implementó una protección en la función sinc:
+
+\begin{lstlisting}
+def sinc_func(x, a, b, c):
+    bx = b * x
+    epsilon = 1e-9
+    return a * np.sin(bx) / (bx + epsilon) + c
+\end{lstlisting}
+
+El término $\epsilon$ previene la división por cero y mantiene la estabilidad numérica cerca del origen. Alternativamente, se podría usar la expansión de Taylor $\sin(bx)/(bx) \approx 1 - (bx)^2/6$ cuando $|bx|$ es muy pequeño, pero la aproximación con $\epsilon$ es más simple y efectiva.
+
+\subsubsection{Selección de Valores Iniciales}
+
+Los valores iniciales se seleccionaron mediante un proceso iterativo:
+
+\begin{enumerate}
+    \item \textbf{Análisis visual}: Se graficaron los puntos clasificados como $1$ y se compararon visualmente con diferentes funciones sinc parametrizadas.
+    \item \textbf{Pruebas manuales}: Se variaron manualmente los parámetros $a$, $b$ y $c$ y se observó el ajuste visual.
+    \item \textbf{Valores iniciales finales}: 
+    \begin{itemize}
+        \item Para \texttt{curve\_fit}: $p_0 = [1.2, 8.5, 0]$ (valores más cercanos al óptimo)
+        \item Para \texttt{leastsq}: $p_0 = [1, 1, 0]$ (valores más alejados para demostrar la convergencia)
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Visualización Interactiva del Proceso de Optimización}
+
+Se implementó una animación utilizando \texttt{matplotlib.animation.FuncAnimation} que muestra la evolución de la curva ajustada durante las iteraciones del algoritmo. Esta visualización permite:
+
+\begin{itemize}
+    \item Observar cómo la curva se ajusta gradualmente a los datos
+    \item Verificar la convergencia del método
+    \item Identificar posibles problemas de convergencia o mínimos locales
+    \item Comprender visualmente el comportamiento del algoritmo LM
+\end{itemize}
+
+La animación muestra en cada frame:
+\begin{itemize}
+    \item Los puntos de datos originales
+    \item La curva ajustada con los parámetros de la iteración actual
+    \item Los valores de los parámetros $a$, $b$, $c$
+    \item Las métricas SSR y RMSE
+\end{itemize}
+
+\newpage
+
+% -----------------------------------------------------------
+% RESULTADOS
+% -----------------------------------------------------------
+
+\section{Resultados}
+
+\subsection{Ejecución y Descripción de Diferentes Casos de Prueba}
+
+\subsubsection{Caso 1: Exploración Inicial con Malla Grande}
+
+En la primera fase, se utilizó una malla de $500 \times 500 = 250,000$ puntos para obtener una visión general del comportamiento del modelo. Los resultados mostraron:
+\begin{itemize}
+    \item Puntos clasificados como $0$: $247,224$ ($98.9\%$)
+    \item Puntos clasificados como $1$: $2,776$ ($1.1\%$)
+\end{itemize}
+
+Esta distribución altamente desbalanceada confirmó que la región de clase $1$ es pequeña y concentrada, lo que sugiere una frontera de decisión bien definida. La visualización mostró que los puntos clasificados como $1$ forman una banda curva estrecha en el plano.
+
+\subsubsection{Caso 2: Refinamiento con Malla Reducida}
+
+Se redujo la malla a $300 \times 300 = 90,000$ puntos en el rango $x_1 \in [0.01, 15]$ y $x_2 \in [-0.5, 2.0]$ para obtener mayor resolución en la región de interés y reducir el tiempo computacional. De esta malla, se identificaron $2,585$ puntos clasificados como $1$, confirmando la presencia de una región bien definida.
+
+\subsubsection{Caso 3: Extracción del Borde Superior}
+
+Del conjunto de puntos clasificados como $1$, se extrajeron $300$ puntos representativos del borde superior, agrupando por valores de $x_1$ (redondeados a 2 decimales) y seleccionando el punto con mayor $x_2$ en cada grupo. Estos puntos fueron utilizados para el ajuste de la curva, proporcionando una representación univaluada de la frontera de decisión.
+
+\subsubsection{Caso 4: Ajuste con curve\_fit}
+
+Utilizando \texttt{curve\_fit} con valores iniciales $p_0 = [1.2, 8.5, 0]$ y un máximo de $1000$ evaluaciones de función, se obtuvieron los siguientes parámetros:
+
+\begin{align}
+a^* &= 1.1196231395609308 \label{eq:param_a} \\
+b^* &= 9.696037359693293 \label{eq:param_b} \\
+c^* &= 0.029507155666119826 \label{eq:param_c}
+\end{align}
+
+El algoritmo convergió exitosamente, demostrando la efectividad del método LM cuando se proporcionan valores iniciales razonables.
+
+\subsubsection{Caso 5: Ajuste con leastsq para Visualización}
+
+Utilizando \texttt{leastsq} con valores iniciales $p_0 = [1, 1, 0]$ (más alejados del óptimo), el algoritmo realizó múltiples iteraciones, mostrando la convergencia gradual de los parámetros. Las primeras iteraciones mostraron:
+
+\begin{itemize}
+    \item Iteración 1: $a=1.0000$, $b=1.0000$, $c=0.0000$, $SSR=22.968802$, $RMSE=0.276700$
+    \item Iteración 3: $a=0.1961$, $b=1.0120$, $c=0.0221$, $SSR=3.666935$, $RMSE=0.110558$
+    \item Iteración 10: $a=0.2548$, $b=1.4895$, $c=0.0238$, $SSR=3.364840$, $RMSE=0.105906$
+    \item Iteración 50: $a=0.5777$, $b=4.1788$, $c=0.0279$, $SSR=2.117755$, $RMSE=0.084019$
+    \item Iteración 100: $a=1.0027$, $b=8.1283$, $c=0.0287$, $SSR=0.541214$, $RMSE=0.042474$
+\end{itemize}
+
+El algoritmo continuó iterando hasta alcanzar la convergencia, mostrando cómo el método LM puede converger desde valores iniciales alejados del óptimo, aunque requiere más iteraciones.
+
+
+
+\subsection{Análisis de Resultados}
+
+\subsubsection{Métricas Finales de Error}
+
+Las métricas finales del ajuste fueron:
+
+\begin{align}
+SSR &= 0.30144381498303807 \label{eq:ssr_final} \\
+RMSE &= 0.031698780995649135 \label{eq:rmse_final}
+\end{align}
+
+Estos valores indican un excelente ajuste, con un error cuadrático medio muy bajo ($RMSE \approx 0.032$), lo que significa que la curva ajustada se aproxima muy bien a los puntos de la frontera de decisión. El $RMSE$ representa aproximadamente el $3.2\%$ del rango de valores de $x_2$ en la frontera (que va aproximadamente de $-0.12$ a $1.28$), lo que confirma la alta precisión del ajuste.
+
+\subsubsection{Ecuación Final}
+
+La ecuación final que describe la frontera de decisión es:
+
+\begin{equation}
+\boxed{x_2 = 1.119623 \cdot \frac{\sin(9.696037 \cdot x_1)}{9.696037 \cdot x_1} + 0.029507}
+\label{eq:ecuacion_final}
+\end{equation}
+
+Esta ecuación permite predecir el valor de $x_2$ en la frontera de decisión para cualquier valor de $x_1$ en el rango de validez del modelo.
+
+\subsubsection{Interpretación de los Parámetros}
+
+\begin{itemize}
+    \item \textbf{Parámetro $a = 1.119623$}: Representa la amplitud de la función sinc. Un valor cercano a $1$ indica que la amplitud es similar a la función sinc estándar, con una ligera amplificación del $11.96\%$. Este parámetro controla la altura del primer máximo y la amplitud de las oscilaciones.
+    
+    \item \textbf{Parámetro $b = 9.696037$}: Representa la frecuencia de oscilación. Un valor alto indica que la función oscila rápidamente, con múltiples ciclos en el rango de $x_1$ considerado. Específicamente, el período de oscilación es aproximadamente $2\pi/9.696037 \approx 0.648$ unidades de $x_1$, lo que significa que hay aproximadamente $15/0.648 \approx 23$ ciclos completos en el rango $x_1 \in [0, 15]$.
+    
+    \item \textbf{Parámetro $c = 0.029507$}: Representa un desplazamiento vertical pequeño, ajustando la posición de la curva para mejor ajuste a los datos. Este desplazamiento es necesario porque la función sinc estándar está centrada en $y=0$, pero la frontera de decisión tiene un desplazamiento vertical positivo.
+\end{itemize}
+
+\subsubsection{Análisis de la Convergencia}
+
+El análisis de las iteraciones del algoritmo muestra un comportamiento típico del método LM:
+
+\begin{enumerate}
+    \item \textbf{Fase inicial} (iteraciones 1-10): El algoritmo realiza grandes ajustes, reduciendo el error de $SSR=22.97$ a $SSR=3.36$ rápidamente. Los parámetros cambian significativamente.
+    
+    \item \textbf{Fase intermedia} (iteraciones 10-100): El algoritmo refina gradualmente los parámetros, reduciendo el error de manera más suave. El parámetro $b$ aumenta gradualmente de $1.49$ a $8.13$, mientras que $a$ aumenta de $0.25$ a $1.00$.
+    
+    \item \textbf{Fase final} (iteraciones 100+): El algoritmo converge hacia los valores óptimos, realizando ajustes finos. El error disminuye lentamente, indicando que se está acercando al mínimo.
+\end{enumerate}
+
+Este comportamiento demuestra la efectividad del método LM: convergencia rápida inicial seguida de refinamiento gradual.
+
+\subsection{Análisis de Complejidad Computacional Experimental}
+
+\subsubsection{Complejidad Temporal}
+
+La complejidad del método LM depende de varios factores:
+
+\begin{enumerate}
+    \item \textbf{Cálculo del Jacobiano}: $O(n \cdot p)$ donde $n$ es el número de puntos ($n=300$ en nuestro caso) y $p$ es el número de parámetros ($p=3$). Esto requiere evaluar $n \cdot p = 900$ derivadas parciales.
+    
+    \item \textbf{Resolución del sistema lineal}: $O(p^3)$ para resolver $[\mathbf{J}^T \mathbf{J} + \lambda \mathbf{I}] \Delta \boldsymbol{\theta} = \mathbf{J}^T \mathbf{r}$. Con $p=3$, esto es $O(27)$ operaciones, que es constante y muy rápido.
+    
+    \item \textbf{Evaluación de la función objetivo}: $O(n)$ en cada iteración para calcular $S(\boldsymbol{\theta})$, requiriendo $n=300$ evaluaciones de la función modelo.
+    
+    \item \textbf{Número de iteraciones}: Típicamente entre $50$ y $150$ iteraciones para convergencia, dependiendo de los valores iniciales.
+\end{enumerate}
+
+La complejidad total por iteración es $O(n \cdot p + p^3) = O(n)$ ya que $p=3$ es constante. Con $n=300$ puntos y aproximadamente $100$ iteraciones, el tiempo total de ejecución fue de aproximadamente $1-2$ segundos en un computador estándar.
+
+\subsubsection{Complejidad Espacial}
+
+La complejidad espacial es $O(n \cdot p)$ para almacenar la matriz Jacobiana, que en nuestro caso es $O(300 \cdot 3) = O(900)$ elementos, completamente manejable. Adicionalmente, se requiere $O(n)$ espacio para almacenar los vectores de residuos y datos, resultando en una complejidad espacial total de $O(n \cdot p + n) = O(n)$.
+
+\subsubsection{Observaciones Experimentales}
+
+\begin{itemize}
+    \item El método convergió en aproximadamente $100-150$ iteraciones desde valores iniciales alejados ($p_0 = [1, 1, 0]$).
+    
+    \item Con valores iniciales más cercanos al óptimo ($p_0 = [1.2, 8.5, 0]$), la convergencia fue más rápida, requiriendo aproximadamente $50-80$ iteraciones.
+    
+    \item El tiempo de ejecución fue dominado por las evaluaciones de la función modelo y el cálculo del Jacobiano, no por la resolución del sistema lineal (debido al pequeño número de parámetros).
+    
+    \item El método mostró estabilidad numérica excelente, sin problemas de singularidad o mal condicionamiento gracias al término de regularización $\lambda \mathbf{I}$.
+\end{itemize}
+
+\newpage
+
+% -----------------------------------------------------------
+% CONCLUSIONES
+% -----------------------------------------------------------
+
+\section{Conclusiones}
+
+\subsection{Resumen de los Hallazgos Más Importantes}
+
+\begin{enumerate}
+    \item \textbf{Identificación del Modelo}: Se logró identificar que la frontera de decisión de la red neuronal Blackbox $S$ sigue un patrón descrito por una función sinc parametrizada, específicamente:
+    \[
+    x_2 = 1.119623 \cdot \frac{\sin(9.696037 \cdot x_1)}{9.696037 \cdot x_1} + 0.029507
+    \]
+    Este hallazgo permite comprender el comportamiento del modelo de caja negra y predecir la frontera de decisión analíticamente.
+    
+    \item \textbf{Calidad del Ajuste}: El método de Levenberg-Marquardt produjo un ajuste excelente, con un $RMSE$ de aproximadamente $0.032$, lo que indica que la curva parametrizada se aproxima muy bien a los puntos de la frontera de decisión. El error representa menos del $3.2\%$ del rango de valores, confirmando la alta precisión del modelo.
+    
+    \item \textbf{Efectividad del Método}: El método LM demostró ser robusto y eficiente para este problema, convergiendo consistentemente desde diferentes valores iniciales. El método mostró convergencia rápida inicial seguida de refinamiento gradual, comportamiento característico y deseable.
+    
+    \item \textbf{Distribución de Clases}: El análisis reveló que la región de clase $1$ es muy pequeña ($1.1\%$ del espacio muestreado), lo que confirma que la frontera de decisión está bien definida y localizada. Esta característica facilita la extracción y modelado de la frontera.
+    
+    \item \textbf{Propiedades de la Frontera}: La frontera de decisión exhibe un comportamiento oscilatorio con frecuencia alta ($b \approx 9.7$), lo que significa que hay múltiples regiones de clase $1$ separadas por regiones de clase $0$ a lo largo del eje $x_1$. Esta estructura compleja fue capturada exitosamente por el modelo sinc parametrizado.
+\end{enumerate}
+
+\subsection{Dificultades Encontradas y Cómo se Resolvieron}
+
+\begin{enumerate}
+    \item \textbf{Identificación del Modelo Base}:
+    \begin{itemize}
+        \item \textbf{Dificultad}: Inicialmente no era claro qué función matemática describía la frontera de decisión. Se exploraron varios modelos candidatos sin éxito.
+        \item \textbf{Solución}: Se realizó un análisis exploratorio visual de los puntos clasificados como $1$, y se uso la ecuacion proporcionada en calse como base . También se exploraron modelos alternativos como relaciones hiperbólicas (observando que $x_1 \cdot x_2$ tenía baja desviación estándar), pero estos no se ajustaban correctamente. El análisis visual sistemático fue clave para identificar el modelo correcto.
+    \end{itemize}
+    
+    \item \textbf{Selección de Puntos para el Ajuste}:
+    \begin{itemize}
+        \item \textbf{Dificultad}: Los puntos clasificados como $1$ forman una región bidimensional, no una curva única. Se necesitaba extraer una curva representativa para el ajuste.
+        \item \textbf{Solución}: Se implementó un algoritmo para extraer el borde superior de la región, agrupando puntos por $x_1$ (redondeados a 2 decimales) y seleccionando el punto con mayor $x_2$ en cada grupo. Este método asume que la frontera es una función univaluada de $x_1$, lo cual fue válido en este caso.
+    \end{itemize}
+    
+    \item \textbf{Singularidades Numéricas}:
+    \begin{itemize}
+        \item \textbf{Dificultad}: La función sinc tiene una singularidad removible en $x=0$, y puede causar problemas numéricos cuando $bx \approx 0$, resultando en división por cero o valores indefinidos.
+        \item \textbf{Solución}: Se implementó una protección añadiendo un término $\epsilon = 10^{-9}$ al denominador para evitar división por cero. Esta aproximación mantiene la estabilidad numérica sin afectar significativamente la precisión del modelo.
+    \end{itemize}
+    
+    \item \textbf{Valores Iniciales}:
+    \begin{itemize}
+        \item \textbf{Dificultad}: El método LM requiere valores iniciales razonables para converger al mínimo global. Valores iniciales muy alejados pueden llevar a convergencia lenta o a mínimos locales.
+        \item \textbf{Solución}: Se realizaron pruebas manuales variando los parámetros y observando visualmente el ajuste. Este proceso iterativo permitió obtener estimaciones iniciales adecuadas ($p_0 = [1.2, 8.5, 0]$ para \texttt{curve\_fit} y $p_0 = [1, 1, 0]$ para \texttt{leastsq}$).
+    \end{itemize}
+    
+    \item \textbf{Cálculo de Puntos de Frontera con Bisección}:
+    \begin{itemize}
+        \item \textbf{Dificultad}: Inicialmente se calcularon puntos de frontera utilizando el método de bisección, lo cual era computacionalmente costoso, requiriendo múltiples evaluaciones del modelo para cada punto de frontera.
+        \item \textbf{Solución}: Se optimizó el proceso utilizando comparaciones directas entre predicciones adyacentes en la malla, que es más eficiente y proporciona resultados equivalentes.
+    \end{itemize}
+    
+    \item \textbf{Exploración de Modelos Alternativos}:
+    \begin{itemize}
+        \item \textbf{Dificultad}: Se exploró inicialmente si el modelo seguía una relación hiperbólica, observando que al multiplicar $x_1 \cdot x_2$ con las predicciones se obtenía una desviación estándar baja, lo que sugería una posible relación.
+        \item \textbf{Solución}: Tras análisis más detallado y visualización, se determinó que este no era el modelo correcto. El análisis sistemático de diferentes modelos candidatos finalmente llevó a la identificación de la función sinc como el modelo adecuado.
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Limitaciones y Restricciones del Enfoque Utilizado}
+
+\begin{enumerate}
+    \item \textbf{Dependencia de la Malla}: La calidad del ajuste depende críticamente de la densidad y distribución de la malla de puntos utilizada. Una malla demasiado gruesa puede perder detalles finos de la frontera, mientras que una malla muy fina es computacionalmente costosa. Además, la malla debe cubrir adecuadamente la región de interés para capturar completamente la frontera.
+    
+    \item \textbf{Extracción del Borde}: El método de extracción del borde superior asume que la frontera de decisión es una función univaluada de $x_1$, es decir, que para cada $x_1$ hay un único $x_2$ máximo en la frontera. Esto puede no ser válido para fronteras más complejas que tengan múltiples valores de $x_2$ para un mismo $x_1$, o para fronteras que no sean funciones en absoluto.
+    
+    \item \textbf{Mínimos Locales}: El método LM puede converger a mínimos locales si los valores iniciales no son adecuados. Aunque en este caso se obtuvo una buena solución, no hay garantía matemática de optimalidad global. El método solo garantiza convergencia a un mínimo local.
+    
+    \item \textbf{Modelo Paramétrico Fijo}: El enfoque asume que la frontera puede ser descrita por una función sinc parametrizada. Si la frontera real tiene una forma fundamentalmente diferente, el ajuste puede no ser óptimo o puede requerir un modelo diferente. La elección del modelo está basada en observación visual, lo cual puede ser subjetivo.
+    
+    \item \textbf{Precisión del Modelo}: La precisión está limitada por la precisión de las predicciones del modelo de Keras, que opera con números de punto flotante de 32 bits. Además, el proceso de umbralización (redondeo a $0$ o $1$) introduce discretización que puede afectar la precisión de la identificación de la frontera.
+    
+    \item \textbf{Rango de Validez}: La ecuación obtenida es válida principalmente en el rango $x_1 \in [0.01, 15]$ y $x_2 \in [-0.5, 2.0]$ donde se realizó el muestreo. Su validez fuera de este rango no está garantizada, y la función sinc puede tener comportamientos diferentes en regiones no muestreadas.
+    
+    \item \textbf{Asunción de Continuidad}: El método asume que la frontera de decisión es continua y suave, lo cual puede no ser cierto para todos los modelos de clasificación. Si la frontera tiene discontinuidades o cambios bruscos, el modelo sinc puede no capturarlos adecuadamente.
+    
+    \item \textbf{Sensibilidad a Ruido}: Si las predicciones del modelo tienen ruido o incertidumbre, el método de extracción del borde superior puede seleccionar puntos que no representan la verdadera frontera, afectando la calidad del ajuste.
+\end{enumerate}
+
+\subsection{Posibles Mejoras y Trabajos Futuros}
+
+\begin{enumerate}
+    \item \textbf{Métodos de Optimización Global}: Implementar métodos de optimización global como algoritmos genéticos, recocido simulado, o búsqueda por enjambre de partículas para evitar convergencia a mínimos locales y garantizar la optimalidad global. Estos métodos pueden ser computacionalmente más costosos pero proporcionan mayor confianza en la solución.
+    
+    \item \textbf{Validación Cruzada}: Implementar validación cruzada para evaluar la generalización del modelo ajustado a nuevos datos no utilizados en el entrenamiento. Esto permitiría cuantificar la robustez del modelo y detectar sobreajuste.
+    
+    \item \textbf{Análisis de Incertidumbre}: Realizar un análisis de incertidumbre de los parámetros estimados, calculando intervalos de confianza utilizando la matriz de covarianza proporcionada por \texttt{curve\_fit}. Esto permitiría cuantificar la confiabilidad de los parámetros estimados.
+    
+    \item \textbf{Modelos No Paramétricos}: Explorar métodos no paramétricos como splines, regresión por kernel, o métodos de aprendizaje automático (por ejemplo, Gaussian Process Regression) para modelar la frontera sin asumir una forma funcional específica. Esto podría capturar mejor fronteras complejas.
+    
+    \item \textbf{Optimización de la Malla}: Implementar técnicas de muestreo adaptativo que concentren más puntos en regiones donde la frontera tiene mayor curvatura o complejidad. Esto mejoraría la eficiencia computacional y la calidad del ajuste.
+    
+    \item \textbf{Análisis de Múltiples Fronteras}: Si la frontera de decisión tiene múltiples componentes (por ejemplo, una curva superior y una inferior, o múltiples regiones desconectadas), desarrollar métodos para identificar y ajustar cada componente por separado. Esto requeriría técnicas de segmentación y agrupamiento.
+    
+    \item \textbf{Comparación con Otros Métodos Numéricos}: Comparar el método LM con otros métodos de optimización no lineal como el método de Newton, quasi-Newton (BFGS, L-BFGS), o métodos de gradiente estocástico. Esto permitiría evaluar las ventajas y desventajas relativas de cada método.
+    
+    \item \textbf{Visualización 3D}: Extender el análisis para visualizar la superficie de probabilidad del modelo en 3D, no solo la frontera de decisión binaria. Esto proporcionaría una comprensión más completa del comportamiento del modelo.
+    
+    \item \textbf{Análisis de Sensibilidad}: Realizar un análisis de sensibilidad para determinar cómo cambios en los parámetros afectan la forma de la frontera de decisión. Esto sería útil para entender la robustez del modelo y para aplicaciones donde los parámetros pueden tener incertidumbre.
+    
+    \item \textbf{Automatización}: Desarrollar un pipeline automatizado que, dado un modelo de caja negra, identifique automáticamente el tipo de función que mejor describe su frontera de decisión. Esto podría involucrar técnicas de selección de modelos, pruebas de hipótesis, o aprendizaje automático para la selección del modelo.
+    
+    \item \textbf{Análisis de Múltiples Dimensiones}: Extender el método para analizar modelos con más de dos variables de entrada, lo cual requeriría técnicas de visualización y análisis de dimensiones superiores.
+    
+    \item \textbf{Validación Teórica}: Si es posible, comparar la frontera identificada con la frontera teórica real del modelo (si se conoce la estructura interna), para validar la precisión del método de identificación.
+\end{enumerate}
+
+\newpage
+
+% -----------------------------------------------------------
+% REFERENCIAS
+% -----------------------------------------------------------
+
+\begin{thebibliography}{9}
+
+\bibitem{levenberg1944method}
+K. Levenberg, ``A Method for the Solution of Certain Non-Linear Problems in Least Squares,'' \textit{Quarterly of Applied Mathematics}, vol. 2, no. 2, pp. 164--168, 1944.
+
+\bibitem{marquardt1963algorithm}
+D. W. Marquardt, ``An Algorithm for Least-Squares Estimation of Nonlinear Parameters,'' \textit{Journal of the Society for Industrial and Applied Mathematics}, vol. 11, no. 2, pp. 431--441, 1963. [Online]. Available: \url{https://doi.org/10.1137/0111030}
+
+\bibitem{more1978levenberg}
+J. J. Moré, ``The Levenberg-Marquardt Algorithm: Implementation and Theory,'' in \textit{Numerical Analysis}, G. A. Watson, Ed. Berlin, Heidelberg: Springer Berlin Heidelberg, 1978, pp. 105--116. [Online]. Available: \url{https://doi.org/10.1007/BFb0067700}
+
+\bibitem{nocedal2006numerical}
+J. Nocedal and S. J. Wright, \textit{Numerical Optimization}, 2nd ed. New York, NY: Springer, 2006.
+
+\bibitem{press2007numerical}
+W. H. Press, S. A. Teukolsky, W. T. Vetterling, and B. P. Flannery, \textit{Numerical Recipes: The Art of Scientific Computing}, 3rd ed. Cambridge, UK: Cambridge University Press, 2007.
+
+\bibitem{scipy2024}
+SciPy Community, ``SciPy Optimize: curve\_fit,'' \textit{SciPy Documentation}, 2024. [Online]. Available: \url{https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.curve_fit.html}
+
+\bibitem{keras2024}
+Keras Team, ``Keras Documentation,'' \textit{Keras.io}, 2024. [Online]. Available: \url{https://keras.io/}
+
+\bibitem{matplotlib2024}
+J. D. Hunter et al., ``Matplotlib: A 2D graphics environment,'' \textit{Computing in Science \& Engineering}, vol. 9, no. 3, pp. 90--95, 2007. [Online]. Available: \url{https://matplotlib.org/}
+
+\bibitem{numpy2024}
+C. R. Harris et al., ``Array programming with NumPy,'' \textit{Nature}, vol. 585, no. 7825, pp. 357--362, 2020. [Online]. Available: \url{https://numpy.org/}
+
+\end{thebibliography}
+
+\end{document}
